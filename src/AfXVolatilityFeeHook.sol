@@ -11,9 +11,10 @@ import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {LPFeeLibrary} from "v4-core/src/libraries/LPFeeLibrary.sol";
 
 /// @title AFX Hook - Dynamic Fee Hook for African Stablecoins
-/// @author ETK2456 - Built in Lagos
+/// @author ETK2456 - Built in Lagos, deploying on Base
 /// @notice Adjusts LP fees 0.01% - 1.5% based on volatility for cNGN, KES, GHS pairs
-contract AfXVolatilityFeeHook is BaseHook {
+/// @dev Built for Base Mainnet - Uniswap v4 compatible - Base gas optimized for Nigerian traders
+contract AFXVolatilityFeeHook is BaseHook {
     using PoolIdLibrary for PoolKey;
     using LPFeeLibrary for uint24;
 
@@ -49,12 +50,7 @@ contract AfXVolatilityFeeHook is BaseHook {
     }
 
     // Only pools that enable dynamic fees can use this hook
-    function beforeInitialize(address, PoolKey calldata key, uint160)
-        external
-        pure
-        override
-        returns (bytes4)
-    {
+    function beforeInitialize(address, PoolKey calldata key, uint160) external pure override returns (bytes4) {
         if (!key.fee.isDynamicFee()) revert("AFX: dynamic fee required");
         return BaseHook.beforeInitialize.selector;
     }
@@ -89,27 +85,22 @@ contract AfXVolatilityFeeHook is BaseHook {
     }
 
     // Core logic - MVP uses time since last swap as volatility proxy
-    // Production: replace with Chainlink cNGN/USD + Uniswap TWAP std dev
+    // Production: replace with Chainlink cNGN/USD + Uniswap TWAP std dev on Base
     function _getDynamicFee(PoolId poolId) internal view returns (uint24) {
         uint256 last = lastUpdate[poolId];
+        if (last == 0) return BASE_FEE;
 
-        if (last == 0) {
-            return BASE_FEE; // first swap
-        }
+        uint256 timeDelta = block.timestamp - last;
 
-        uint256 timeSince = block.timestamp - last;
-
-        if (timeSince < 1 minutes) {
-            return 8000; // 0.8% - high volatility / high activity
-        } else if (timeSince < 10 minutes) {
-            return BASE_FEE; // 0.3% - normal
+        // < 1 min = high volatility, > 1 hour = calm
+        if (timeDelta < 60) {
+            return MAX_FEE; // 1.5% - protect LPs
+        } else if (timeDelta < 300) {
+            return 8000; // 0.8%
+        } else if (timeDelta < 3600) {
+            return BASE_FEE; // 0.3%
         } else {
-            return 500; // 0.05% - calm, attract traders
+            return MIN_FEE; // 0.01% - attract traders
         }
-    }
-
-    // For testing on Sepolia
-    function setMockLastUpdate(PoolId poolId, uint256 timestamp) external {
-        lastUpdate[poolId] = timestamp;
     }
 }
